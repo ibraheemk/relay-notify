@@ -1,0 +1,19 @@
+{
+  "name": "relay-alerts",
+  "version": "1.0.0",
+  "description": "Sensor Alerts",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "test": "node server.js",
+    "start": "node server.js"
+  },
+  "author": "Ibraheem Khalifa",
+  "license": "MIT",
+  "dependencies": {
+    "@relaypro/sdk": "github:relaypro/relay-js#feature/interactions",
+    "axios": "^0.26.0",
+    "express": "^4.17.3",
+    "express-basic-auth": "^1.2.1"
+  }
+}
