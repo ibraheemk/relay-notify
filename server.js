@@ -2,16 +2,12 @@ import pkg from '@relaypro/sdk'
 const { relay, Event, createWorkflow, Uri } = pkg
 import axios from 'axios'
 import express from 'express'
-import basicAuth from 'express-basic-auth'
 
 const auth_endpoint = `https://auth.relaygo.com/oauth2/token`
 const express1 = express()
 const port = process.env.PORT || 3000
 
 express1.use(express.json());
-express1.use(basicAuth({
-  users: {'admin':'secret'}
-}))
 express1.use(express.urlencoded({
   extended: true
 }));
@@ -42,17 +38,19 @@ _axios.interceptors.response.use(function (response) {
   return Promise.reject(error)
 })
 
-express1.post('/notify/:location', async (req, res) => {
+express1.post('/', async (req, res) => {
   console.log(`Request to /notify`)
-  location = req.params.location
+  let target = req.body.target
+  let text = req.body.text
+  let confirm = req.body.confirmation_required
   try { 
     const response = await _axios.post(`${process.env.RELAY_HOST}${process.env.RELAY_WF}?subscriber_id=${process.env.SUB_ID}&user_id=VIRT2dXWtVfJ5PKZaBsogij8dS`,
     {
       "action": "invoke",
       "action_args": {
-        "targets": 'Jim',
-        "text": 'Maintenance needed',
-        "confirmation_required": 'yes'
+        "targets": target,
+        "text": text,
+        "confirmation_required": confirm
         }
     })
     if (response.status == 200) {
@@ -82,24 +80,13 @@ async function refresh_auth() {
   }
 }
 
-
-export default createWorkflow(relay => {
-  relay.on(Event.START, async (event) => {
-    const { trigger: { args: { source_uri } } } = event
-    relay.startInteraction([source_uri], `hello world`)
-  })
-
-  relay.on(Event.INTERACTION_STARTED, async ({ source_uri }) => {
-    const deviceName = Uri.parseDeviceName(source_uri)
-    await relay.sayAndWait(source_uri, `What is your name ?`)
-    const { text: userProvidedName } = await relay.listen(source_uri)
-    await relay.sayAndWait(source_uri, `Hello ${userProvidedName}! You are currently using ${deviceName}`)
-    await relay.terminate()
-  })
-})
-
 const alert = createWorkflow(wf => {
   wf.on(Event.START, async (event) => {
+    console.log(`Event: ${JSON.stringify(event.trigger.args.args)}`)
+    wf.set({"target":event.trigger.args.args.targets, 
+            "text": event.trigger.args.args.text, 
+            "confirm": event.trigger.args.args.confirmation_required})
+    
     const { trigger: { args: { source_uri } } } = event
     wf.startInteraction([source_uri], `relay alerts`)
   })
@@ -107,23 +94,31 @@ const alert = createWorkflow(wf => {
   wf.on(Event.INTERACTION_STARTED, async ({ source_uri }) => {
     const deviceName = Uri.parseDeviceName(source_uri)
     console.log(`interaction start ${source_uri}`)
-    //const [targets, text, confirm] = await wf.get([`targets`, `text`, `confirmation_required`])
-    //console.log(`Targets: ${targets}, Text: ${text}, Confirm: ${confirm}`)
-    const targets = 'Jim'
-    const text = `Maintenance needed at ${location}`
-    const confirm = true
+    const targets = await wf.getVar(`target`, undefined)
+    const text = await wf.getVar(`text`, undefined)
+    
+    const confirm = await wf.getVar(`confirm`, undefined)
 
-    const actualTargets = targets.split(`,`).map(Uri.deviceName)
+    const actualTargets = targets.split(`,`).map(Uri.groupName)
     console.log(`broadcast workflow targets`, actualTargets)
-    if (confirm) {
+    if (confirm === `yes`) {
       await wf.alert(actualTargets, source_uri, 'notify', text)
     } else {
-      await wf.broadcast(actualTargets, text)
+      await wf.broadcast(actualTargets, source_uri, 'notify', text)
     }
-    await wf.terminate()
+  })
 
+  wf.on(Event.NOTIFICATION, async (event) => { 
+    if(event.event === `ack_event`) {
+      await wf.broadcast(event.source_uri, event.source_uri, `confirmation`, `Confirmed`)
+    }
+    const targets = await wf.getVar(`target`, undefined)
+    const actualTargets = targets.split(`,`).map(Uri.groupName)
+    await wf.cancelAlert(actualTargets, event.name)
+    await wf.terminate()
   })
 })
+
 
 const server = express1.listen(port, () => {
   console.log(`express listening on ${port}`)
